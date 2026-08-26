@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import WatchConnectivity
 
@@ -67,4 +68,14 @@ extension PhoneConnectivity: WCSessionDelegate {
     ) {
         Task { @MainActor in self.apply(userInfo) }
     }
+
+    #if os(iOS)
+    // Required by WCSessionDelegate on iOS only; never called on watchOS.
+    // Present so the file type-checks against a non-watchOS SDK (e.g. editor tooling).
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
+
+    nonisolated func sessionDidDeactivate(_ session: WCSession) {
+        session.activate()
+    }
+    #endif
 }
