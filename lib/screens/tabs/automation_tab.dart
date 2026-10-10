@@ -15,17 +15,26 @@ class AutomationTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
       children: [
-        const Text('Автомат бүртгэл', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+        const Text(
+          'Автомат бүртгэл',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+        ),
         const SizedBox(height: 14),
         const AppCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SectionTitle('Google Cloud дээр ажиллуулах загвар'),
-              StepText('Cloud Run дээр жижиг service ажиллуулна. Утас нээлттэй байх шаардлагагүй.'),
-              StepText('Secret Manager дээр login, password, tenant утгуудыг хадгална.'),
-              StepText('Cloud Scheduler 07:40 болон 16:10 цагт HTTP trigger дуудна.'),
-              StepText('Service /auth/login -> /auth/select-tenant -> /attendance/check-in эсвэл check-out дарааллаар ажиллана.'),
+              SectionTitle('Серверийн автомат бүртгэл'),
+              StepText(
+                '13.214.2.6 сервер дээр ажиллана. Утас нээлттэй байх шаардлагагүй.',
+              ),
+              StepText(
+                'Серверийн тохируулсан хэрэглэгчид Лхагва–Баасан ажиллана.',
+              ),
+              StepText('Ирэх 07:30–07:45, явах 16:15–16:30 дотор цаг сонгоно.'),
+              StepText(
+                'Service /auth/login -> /auth/select-tenant -> /attendance/check-in эсвэл check-out дарааллаар ажиллана.',
+              ),
             ],
           ),
         ),
@@ -34,10 +43,10 @@ class AutomationTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SectionTitle('Local schedule'),
-              ScheduleRow(label: 'Ирэх', value: '07:40 UTC+8'),
-              ScheduleRow(label: 'Явах', value: '16:10 UTC+8'),
-              ScheduleRow(label: 'Coordinates', value: 'Random within 200m'),
+              SectionTitle('Asia/Ulaanbaatar · Лхагва–Баасан'),
+              ScheduleRow(label: 'Ирэх', value: '07:30–07:45 UTC+8'),
+              ScheduleRow(label: 'Явах', value: '16:15–16:30 UTC+8'),
+              ScheduleRow(label: 'Coordinates', value: 'Random within 100m'),
             ],
           ),
         ),

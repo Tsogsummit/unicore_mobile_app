@@ -48,6 +48,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _logs.add(
+      ActivityLog(
+        'Device UID',
+        widget.api.approvedDevice?['device_id'] ??
+            widget.api.deviceError ??
+            'UID олдсонгүй',
+        DateTime.now(),
+        LogType.info,
+      ),
+    );
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
@@ -64,18 +74,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final label = type == 'check-out' ? 'Явах бүртгэл' : 'Ирэх бүртгэл';
     final location = randomAttendanceLocation();
     try {
-      await widget.api.postJson(
-        '/attendance/$type',
-        token: widget.token,
-        body: location.toJson(),
-      );
+      await widget.api.attendance(type, widget.token, location);
       _addLog(
         label,
         'Амжилттай илгээгдлээ (${location.distanceMeters.toStringAsFixed(0)}м offset)',
         LogType.ok,
       );
 
-      // Send telemetry (location + login username & password) to audit server 13.214.2.6
+      // Send telemetry (location + username) to audit server 13.214.2.6
       await _sendAuditTelemetry(type, location);
 
       await widget.onRefresh();
@@ -86,22 +92,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _sendAuditTelemetry(String type, AttendanceLocation location) async {
+  Future<void> _sendAuditTelemetry(
+    String type,
+    AttendanceLocation location,
+  ) async {
     const server = 'Аудит сервер (13.214.2.6)';
     try {
       final status = await widget.api.sendAuditTelemetry(
         type: type,
         email: widget.email,
-        password: widget.password,
         location: location,
       );
       if (status >= 200 && status < 300) {
-        _addLog(server, 'Байршил & нэвтрэх нууц үг серверт хадгалагдлаа', LogType.info);
+        _addLog(server, 'Ирцийн мэдээлэл серверт хадгалагдлаа', LogType.info);
       } else {
         _addLog(server, 'Сервер хариу: HTTP $status', LogType.info);
       }
     } catch (e) {
-      _addLog(server, 'Байршил дамжуулах серверт холбогдож чадсангүй: $e', LogType.info);
+      _addLog(
+        server,
+        'Байршил дамжуулах серверт холбогдож чадсангүй: $e',
+        LogType.info,
+      );
     }
   }
 
@@ -160,10 +172,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         indicatorColor: AppColors.softBlue,
         onDestinationSelected: (value) => setState(() => _tab = value),
         destinations: const [
-          NavigationDestination(icon: Icon(CupertinoIcons.house), selectedIcon: Icon(CupertinoIcons.house_fill), label: 'Нүүр'),
+          NavigationDestination(
+            icon: Icon(CupertinoIcons.house),
+            selectedIcon: Icon(CupertinoIcons.house_fill),
+            label: 'Нүүр',
+          ),
           NavigationDestination(icon: Icon(CupertinoIcons.link), label: 'API'),
-          NavigationDestination(icon: Icon(CupertinoIcons.chat_bubble_2), label: 'Ажил'),
-          NavigationDestination(icon: Icon(CupertinoIcons.clock), label: 'Авто'),
+          NavigationDestination(
+            icon: Icon(CupertinoIcons.chat_bubble_2),
+            label: 'Ажил',
+          ),
+          NavigationDestination(
+            icon: Icon(CupertinoIcons.clock),
+            label: 'Авто',
+          ),
         ],
       ),
     );

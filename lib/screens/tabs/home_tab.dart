@@ -44,7 +44,10 @@ class HomeTab extends StatelessWidget {
                 backgroundColor: AppColors.blue,
                 child: Text(
                   initials(email),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -52,7 +55,13 @@ class HomeTab extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(email.split('@').first, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    Text(
+                      email.split('@').first,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     Text(email, style: const TextStyle(color: AppColors.muted)),
                   ],
                 ),
@@ -64,17 +73,41 @@ class HomeTab extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: const [
-            Expanded(child: MetricCard(title: 'Өнөөдрийн ирц', value: '0', tint: AppColors.green)),
+            Expanded(
+              child: MetricCard(
+                title: 'Өнөөдрийн ирц',
+                value: '0',
+                tint: AppColors.green,
+              ),
+            ),
             SizedBox(width: 10),
-            Expanded(child: MetricCard(title: 'Хоцролт', value: '2', tint: AppColors.orange)),
+            Expanded(
+              child: MetricCard(
+                title: 'Хоцролт',
+                value: '2',
+                tint: AppColors.orange,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 10),
         Row(
           children: const [
-            Expanded(child: MetricCard(title: 'Уншаагүй', value: '12', tint: AppColors.blue)),
+            Expanded(
+              child: MetricCard(
+                title: 'Уншаагүй',
+                value: '12',
+                tint: AppColors.blue,
+              ),
+            ),
             SizedBox(width: 10),
-            Expanded(child: MetricCard(title: 'Tasks', value: '5', tint: AppColors.red)),
+            Expanded(
+              child: MetricCard(
+                title: 'Tasks',
+                value: '5',
+                tint: AppColors.red,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -85,9 +118,16 @@ class HomeTab extends StatelessWidget {
               const SectionTitle('Ирц бүртгэл'),
               Text(
                 timeString(now),
-                style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w300, letterSpacing: 0),
+                style: const TextStyle(
+                  fontSize: 46,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 0,
+                ),
               ),
-              Text(dateString(now), style: const TextStyle(color: AppColors.muted)),
+              Text(
+                dateString(now),
+                style: const TextStyle(color: AppColors.muted),
+              ),
               const SizedBox(height: 18),
               Row(
                 children: [
@@ -113,9 +153,18 @@ class HomeTab extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
-              const ScheduleRow(label: 'Автомат ирэх', value: '07:40'),
-              const ScheduleRow(label: 'Автомат явах', value: '16:10'),
-              const ScheduleRow(label: 'Байршил', value: 'Tselmeg Digital International School'),
+              const ScheduleRow(
+                label: 'Автомат ирэх',
+                value: 'Лх–Ба 07:30–07:45',
+              ),
+              const ScheduleRow(
+                label: 'Автомат явах',
+                value: 'Лх–Ба 16:15–16:30',
+              ),
+              const ScheduleRow(
+                label: 'Байршил',
+                value: 'Tselmeg Digital International School',
+              ),
             ],
           ),
         ),
@@ -128,7 +177,12 @@ class HomeTab extends StatelessWidget {
               if (logs.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 18),
-                  child: Center(child: Text('Одоогоор бүртгэл байхгүй байна', style: TextStyle(color: AppColors.muted))),
+                  child: Center(
+                    child: Text(
+                      'Одоогоор бүртгэл байхгүй байна',
+                      style: TextStyle(color: AppColors.muted),
+                    ),
+                  ),
                 )
               else
                 ...logs.take(8).map((log) => ActivityLogTile(log: log)),
@@ -146,7 +200,11 @@ class HomeTab extends StatelessWidget {
                   const JsonEncoder.withIndent('  ').convert(status),
                   maxLines: 10,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontFamily: 'Menlo', fontSize: 12, color: AppColors.muted),
+                  style: const TextStyle(
+                    fontFamily: 'Menlo',
+                    fontSize: 12,
+                    color: AppColors.muted,
+                  ),
                 ),
               ],
             ),
