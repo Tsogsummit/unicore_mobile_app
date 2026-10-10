@@ -11,12 +11,13 @@ import 'package:unicore_mobile_app/widgets/cards.dart';
 import 'package:unicore_mobile_app/widgets/inputs.dart';
 import 'package:unicore_mobile_app/widgets/tiles.dart';
 
-/// Email/password login screen with optional "remember me" persistence.
+/// Email/password login screen without preset or remembered credentials.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.api, required this.onLoggedIn});
 
   final UnicoreApi api;
-  final Future<void> Function(String token, String email, String password) onLoggedIn;
+  final Future<void> Function(String token, String email, String password)
+  onLoggedIn;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -25,7 +26,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  bool _remember = false;
   bool _loading = false;
 
   @override
@@ -35,36 +35,21 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _loadSavedCredentials() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedRemember = prefs.getBool('unicore_remember_me') ?? false;
-      if (savedRemember) {
-        final savedEmail = prefs.getString('unicore_saved_email') ?? '';
-        final savedPassword = prefs.getString('unicore_saved_password') ?? '';
-        if (mounted) {
-          setState(() {
-            _email.text = savedEmail;
-            _password.text = savedPassword;
-            _remember = true;
-          });
-        }
-      }
-    } catch (_) {}
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in [
+      'unicore_remember_me',
+      'unicore_saved_email',
+      'unicore_saved_password',
+    ]) {
+      await prefs.remove(key);
+    }
   }
 
-  Future<void> _saveCredentials(String email, String password, bool remember) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (remember) {
-        await prefs.setBool('unicore_remember_me', true);
-        await prefs.setString('unicore_saved_email', email);
-        await prefs.setString('unicore_saved_password', password);
-      } else {
-        await prefs.setBool('unicore_remember_me', false);
-        await prefs.remove('unicore_saved_email');
-        await prefs.remove('unicore_saved_password');
-      }
-    } catch (_) {}
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
   }
 
   Future<void> _login() async {
@@ -79,7 +64,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = true);
     try {
       final token = await widget.api.login(email, password);
-      await _saveCredentials(email, password, _remember);
       // Mirror the signed-in credentials to the paired Apple Watch (iOS only,
       // best-effort) so the watch can run attendance on its own.
       await WatchSync.syncCredentials(email, password);
@@ -138,7 +122,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 8),
                           const Text(
                             'Олон байгууллагын ERP систем',
-                            style: TextStyle(color: AppColors.muted, fontSize: 15),
+                            style: TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 15,
+                            ),
                           ),
                           const SizedBox(height: 20),
                           const SegmentedLoginModes(),
@@ -159,17 +146,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 14),
                           Row(
                             children: [
-                              Checkbox(
-                                value: _remember,
-                                activeColor: AppColors.blue,
-                                onChanged: (value) => setState(() {
-                                  _remember = value ?? false;
-                                }),
-                              ),
-                              const Text(
-                                'Намайг сана',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
                               const Spacer(),
                               const ApiChip('/auth/login'),
                             ],
@@ -187,9 +163,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 14),
                     Row(
                       children: const [
-                        Expanded(child: StoreButton(icon: CupertinoIcons.play_arrow_solid, label: 'Google Play')),
+                        Expanded(
+                          child: StoreButton(
+                            icon: CupertinoIcons.play_arrow_solid,
+                            label: 'Google Play',
+                          ),
+                        ),
                         SizedBox(width: 10),
-                        Expanded(child: StoreButton(icon: Icons.apple, label: 'App Store')),
+                        Expanded(
+                          child: StoreButton(
+                            icon: Icons.apple,
+                            label: 'App Store',
+                          ),
+                        ),
                       ],
                     ),
                   ],

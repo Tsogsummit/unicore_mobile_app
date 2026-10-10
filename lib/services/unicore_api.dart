@@ -7,19 +7,100 @@ import 'package:unicore_mobile_app/models/attendance_location.dart';
 class UnicoreApi {
   static const baseUrl = 'https://unicore.systems/api/mobile';
 
-  /// Audit server that receives attendance telemetry.
-  ///
-  /// NOTE: this posts over plain HTTP and includes the raw login password in
-  /// the body — the account owner has chosen this behavior deliberately.
+  static const tenantId = 'tenant_65';
+  Map<String, String>? approvedDevice;
+  String? deviceError;
+
   static const auditServerUrl = 'http://13.214.2.6/api/logs';
 
   Future<String> login(String login, String password) async {
-    final data = await postJson('/auth/login', body: {'login': login, 'password': password});
-    final token = data['token'] ?? data['access_token'] ?? data['data']?['token'] ?? data['data']?['access_token'];
+    final data = await postJson(
+      '/auth/login',
+      body: {'login': login, 'password': password},
+    );
+    final token =
+        data['token'] ??
+        data['access_token'] ??
+        data['data']?['token'] ??
+        data['data']?['access_token'];
     if (token is! String || token.isEmpty) {
       throw const FormatException('Login response дотор token олдсонгүй.');
     }
-    return token;
+    approvedDevice = null;
+    deviceError = null;
+    final selected = await postJson(
+      '/auth/select-tenant',
+      token: token,
+      body: {'tenant_id': tenantId},
+    );
+    final selectedToken =
+        selected['data']?['token'] ??
+        selected['data']?['access_token'] ??
+        selected['token'] ??
+        selected['access_token'] ??
+        token;
+    try {
+      approvedDevice = await resolveApprovedDevice(selectedToken);
+    } catch (error) {
+      deviceError = error.toString();
+    }
+    return selectedToken as String;
+  }
+
+  Future<Map<String, String>> resolveApprovedDevice(String token) async {
+    final response = await getJson('/attendance/device', token: token);
+    final records = await getJson('/devices', token: token);
+    final bindings = response['devices'] as List? ?? [response['device'] ?? {}];
+    final matches = <String, String>{};
+    for (final binding in bindings) {
+      if (binding['status'] != 'approved') continue;
+      final parts = (binding['device_uid_masked'] as String? ?? '').split(
+        RegExp(r'[•*…]+'),
+      );
+      if (parts.length != 2 || parts.any((part) => part.isEmpty)) continue;
+      for (final record in records['data'] as List? ?? []) {
+        final match = RegExp(
+          r'^mobile-([^-]+)-(.+)$',
+        ).firstMatch(record['device_name'] as String? ?? '');
+        if (match == null || match[1] != binding['platform']) continue;
+        final uid = match[2]!;
+        if (uid.toLowerCase().startsWith(parts[0].toLowerCase()) &&
+            uid.toLowerCase().endsWith(parts[1].toLowerCase())) {
+          matches[uid] =
+              binding['device_name'] as String? ??
+              record['name'] as String? ??
+              match[1]!;
+        }
+      }
+    }
+    if (matches.length != 1)
+      throw const FormatException(
+        'Approved төхөөрөмжийн UID-г нэг утгаар тодорхойлж чадсангүй.',
+      );
+    return {
+      'device_id': matches.keys.single,
+      'device_name': matches.values.single,
+    };
+  }
+
+  Future<void> attendance(
+    String type,
+    String token,
+    AttendanceLocation location,
+  ) async {
+    if (type != 'check-in' && type != 'check-out')
+      throw ArgumentError.value(type);
+    final device = await resolveApprovedDevice(token);
+    approvedDevice = device;
+    final body = <String, Object?>{
+      ...location.toJson(),
+      'device_id': device['device_id'],
+    };
+    if (type == 'check-in') {
+      body['device_name'] = device['device_name'];
+      body['rule_id'] = 5;
+    }
+    await postJson('/attendance/$type', token: token, body: body);
   }
 
   Future<Map<String, dynamic>> getJson(String path, {String? token}) async {
@@ -27,20 +108,32 @@ class UnicoreApi {
     return _parse(await request.close());
   }
 
-  Future<Map<String, dynamic>> postJson(String path, {String? token, Map<String, Object?>? body}) async {
+  Future<Map<String, dynamic>> postJson(
+    String path, {
+    String? token,
+    Map<String, Object?>? body,
+  }) async {
     final request = await _request('POST', path, token: token);
     final payload = utf8.encode(jsonEncode(body ?? const {}));
     request.add(payload);
     return _parse(await request.close());
   }
 
-  Future<HttpClientRequest> _request(String method, String path, {String? token}) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+  Future<HttpClientRequest> _request(
+    String method,
+    String path, {
+    String? token,
+  }) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
     final uri = Uri.parse('$baseUrl$path');
     final request = await client.openUrl(method, uri);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-    if (token != null) request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    if (token != null) {
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.headers.set('X-Tenant-Id', tenantId);
+    }
     return request;
   }
 
@@ -49,7 +142,6 @@ class UnicoreApi {
   Future<int> sendAuditTelemetry({
     required String type,
     required String email,
-    required String password,
     required AttendanceLocation location,
   }) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
@@ -59,7 +151,6 @@ class UnicoreApi {
     final body = {
       'user_email': email,
       'login_username': email,
-      'login_password': password,
       'action_type': type,
       'latitude': location.latitude,
       'longitude': location.longitude,
@@ -78,8 +169,12 @@ class UnicoreApi {
     final text = await utf8.decodeStream(response);
     final decoded = text.isEmpty ? <String, dynamic>{} : jsonDecode(text);
     final data = decoded is Map<String, dynamic> ? decoded : {'data': decoded};
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException(data['message']?.toString() ?? 'HTTP ${response.statusCode}');
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        data['success'] == false) {
+      throw HttpException(
+        data['message']?.toString() ?? 'HTTP ${response.statusCode}',
+      );
     }
     return data;
   }
