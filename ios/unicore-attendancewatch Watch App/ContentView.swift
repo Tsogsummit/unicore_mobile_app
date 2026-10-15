@@ -25,9 +25,11 @@ struct ContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
             }
-            .background(Color(red: 0.97, green: 0.98, blue: 1.0))
+            .background(Color(red: 0.97, green: 0.98, blue: 1.0).ignoresSafeArea())
             .navigationTitle("UNiCORE 4.0")
         }
+        // Cards use light backgrounds; watchOS defaults to dark, which renders text white/gray on white.
+        .environment(\.colorScheme, .light)
         .task {
             model.updateCredentials(connectivity.credentials)
             await model.loginIfNeeded()
