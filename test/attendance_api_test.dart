@@ -25,7 +25,11 @@ class MemoryStore implements SessionStore {
 class Fixture {
   final store = MemoryStore();
   final calls = <http.Request>[];
-  int logins = 0, failure = 0, lookupStatus = 200;
+  int logins = 0,
+      failure = 0,
+      lookupStatus = 200,
+      recoveries = 0,
+      recoveryStatus = 200;
   String serverUid = uid;
   bool approved = true, missing = false, alwaysFail = false;
   static const uid = 'ABCD0000-1111-2222-3333-000000001234';
@@ -38,13 +42,16 @@ class Fixture {
       Object data = {'success': true};
       int status = 200;
       if (path == '/api/device/resolve') {
-        status = missing ? 422 : lookupStatus;
+        final recovering = jsonDecode(req.body)['recover_token'] == true;
+        if (recovering) recoveries++;
+        status = recovering ? recoveryStatus : (missing ? 422 : lookupStatus);
         data = status == 200
             ? {
                 'success': true,
                 'device_uid': serverUid,
                 'platform': 'ios',
                 'source': 'server',
+                if (recovering) 'token': 'recovered-$recoveries',
                 'lookup_token': 'test-lookup-token-01234567890123456789',
               }
             : {
@@ -149,21 +156,74 @@ void main() {
     },
   );
   test(
-    'expired restored session requires login and deletes saved token',
+    'restored 401 recovers through server without password or login',
     () async {
       final f = Fixture();
-      final a = f.api();
-      await a.login('user', 'test');
-      final b = f.api();
-      final t = await b.restoreSession();
+      await f.api().login('user', 'test');
+      final api = f.api();
+      final t = await api.restoreSession();
       f.failure = 401;
+      await api.getJson('/attendance/status', token: t);
+      expect(api.currentToken, 'recovered-1');
+      expect(f.logins, 1);
+      expect(f.recoveries, 1);
+      final request = f.calls.firstWhere(
+        (r) =>
+            r.url.path == '/api/device/resolve' &&
+            jsonDecode(r.body)['recover_token'] == true,
+      );
+      final body = jsonDecode(request.body);
+      expect(body.containsKey('password'), isFalse);
+      expect(body['rejected_token'], 'selected-1');
+      expect(await f.api().restoreSession(), 'recovered-1');
+    },
+  );
+  test(
+    'invalid recovery session requires login, network failure preserves session',
+    () async {
+      final f = Fixture();
+      await f.api().login('user', 'test');
+      final api = f.api();
+      final t = await api.restoreSession();
+      f.failure = 401;
+      f.recoveryStatus = 503;
       await expectLater(
-        b.getJson('/attendance/status', token: t),
+        api.getJson('/attendance/status', token: t),
+        throwsA(isA<DeviceLookupException>()),
+      );
+      expect(api.currentToken, t);
+      expect(await f.api().restoreSession(), t);
+      f.failure = 401;
+      f.recoveryStatus = 401;
+      await expectLater(
+        api.getJson('/attendance/status', token: t),
+        throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)),
+      );
+      expect(api.currentToken, isNull);
+      expect(await f.api().restoreSession(), isNull);
+    },
+  );
+  test(
+    'server recovery retries upstream exactly once and does not refresh 403',
+    () async {
+      final f = Fixture();
+      await f.api().login('user', 'test');
+      final api = f.api();
+      final t = await api.restoreSession();
+      f.failure = 403;
+      await expectLater(
+        api.getJson('/attendance/status', token: t),
         throwsA(isA<ApiException>()),
       );
-      expect(b.currentToken, isNull);
+      expect(f.recoveries, 0);
+      f.failure = 401;
+      f.alwaysFail = true;
+      await expectLater(
+        api.getJson('/attendance/status', token: t),
+        throwsA(isA<ApiException>()),
+      );
+      expect(f.recoveries, 1);
       expect(f.logins, 1);
-      expect(await f.api().restoreSession(), isNull);
     },
   );
   test(
@@ -273,15 +333,14 @@ void main() {
     expect(jsonDecode(f.calls.last.body).containsKey('password'), isFalse);
   });
   test(
-    'restart checks server and requires login when mapping changed',
+    'restart recovers a new device mapping through authenticated server session',
     () async {
       final f = Fixture();
       await f.api().login('user', 'test');
       f.serverUid = 'NEW-SERVER-ID';
-      await expectLater(
-        f.api().restoreSession(),
-        throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)),
-      );
+      expect(await f.api().restoreSession(), 'recovered-1');
+      expect(f.recoveries, 1);
+      expect(f.logins, 1);
       expect(f.calls.last.url.path, '/api/device/resolve');
     },
   );

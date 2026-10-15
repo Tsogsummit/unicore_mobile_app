@@ -246,14 +246,10 @@ class UnicoreApi {
       _token = null;
       approvedDevice = {'device_id': uid, 'device_name': platform};
       await _save();
-      if (_password == null) {
-        throw const ApiException(
-          401,
-          'Серверт төхөөрөмжийн ID өөрчлөгдсөн. Шинэ ID-гаар дахин нэвтэрнэ үү.',
-        );
-      }
       onProgress?.call('Шинэ төхөөрөмжөөр нэвтэрч байна…');
-      _token = await _authenticate();
+      _token = _password == null
+          ? await _recoverFromServer()
+          : await _authenticate();
       await _save();
     }
   }
@@ -438,10 +434,48 @@ class UnicoreApi {
     }
   }
 
+  Future<String> _recoverFromServer({String? rejectedToken}) async {
+    if (_account == null || _lookupToken == null) {
+      throw const ApiException(401, 'Дахин нэвтэрнэ үү.');
+    }
+    try {
+      final result =
+          await DeviceResolver(
+            () => _newClient(requestTimeout: const Duration(seconds: 130)),
+          ).resolve(
+            _account!,
+            null,
+            (_) {},
+            lookupToken: _lookupToken,
+            recoverToken: true,
+            rejectedToken: rejectedToken,
+          );
+      if (result['device_uid'] != _uid || result['platform'] != _platform) {
+        throw const ApiException(
+          409,
+          'Төхөөрөмжийн мэдээлэл өөрчлөгдлөө. Дахин оролдоно уу.',
+        );
+      }
+      final token = result['token'];
+      if (token is! String || token.isEmpty) {
+        throw const ApiException(502, 'Токен сэргээх хариу дутуу байна.');
+      }
+      return token;
+    } on DeviceLookupException catch (error) {
+      if (error.status == 401) {
+        await logout(invalidateToken: true);
+        throw ApiException(401, error.message);
+      }
+      rethrow;
+    }
+  }
+
   Future<String> _refresh() async {
     if (_refreshing != null) return _refreshing!;
     final work = () async {
-      _token = await _authenticate();
+      _token = _password == null
+          ? await _recoverFromServer(rejectedToken: _token)
+          : await _authenticate();
       await _save();
       return _token!;
     }();
@@ -463,13 +497,6 @@ class UnicoreApi {
       return await _raw(path, token: actual, body: body);
     } on ApiException catch (error) {
       if (error.status != 401 || actual == null) rethrow;
-      if (_password == null) {
-        await logout(invalidateToken: true);
-        throw const ApiException(
-          401,
-          'Нэвтрэх хугацаа дууссан. Дахин нэвтэрнэ үү.',
-        );
-      }
       final fresh = _token != null && _token != actual
           ? _token!
           : await _refresh();

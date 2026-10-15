@@ -30,6 +30,8 @@ class DeviceResolver {
     String? password,
     void Function(String) report, {
     String? lookupToken,
+    bool recoverToken = false,
+    String? rejectedToken,
   }) async {
     final random = Random.secure();
     final id = List.generate(
@@ -84,6 +86,8 @@ class DeviceResolver {
               'login': account,
               if (lookupToken == null) 'password': password,
               'lookup_token': ?lookupToken,
+              if (recoverToken) 'recover_token': true,
+              'rejected_token': ?rejectedToken,
               'client': 'mobile',
               'progress_id': progressId,
             }),
