@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,6 +27,19 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _loading = false;
+  String _loginStage = "";
+  String? _loginError;
+  final _stages = <String>[];
+  Timer? _elapsedTimer;
+  int _elapsedSeconds = 0;
+
+  void _report(String stage) {
+    if (!mounted) return;
+    setState(() {
+      _loginStage = stage;
+      if (_stages.isEmpty || _stages.last != stage) _stages.add(stage);
+    });
+  }
 
   @override
   void initState() {
@@ -47,12 +60,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _elapsedTimer?.cancel();
     _email.dispose();
     _password.dispose();
     super.dispose();
   }
 
   Future<void> _login() async {
+    if (_loading) return;
     FocusScope.of(context).unfocus();
     final email = _email.text.trim();
     final password = _password.text;
@@ -61,16 +76,31 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loginError = null;
+      _stages.clear();
+    });
+    _elapsedSeconds = 0;
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) setState(() => _elapsedSeconds = timer.tick);
+    });
     try {
-      final token = await widget.api.login(email, password);
+      final token = await widget.api.login(
+        email,
+        password,
+        onProgress: _report,
+      );
+      _report("Нэвтэрлээ. Watch-тай холбож байна…");
       // Mirror the signed-in credentials to the paired Apple Watch (iOS only,
       // best-effort) so the watch can run attendance on its own.
       await WatchSync.syncCredentials(email, password);
       await widget.onLoggedIn(token, email, password);
     } catch (error) {
-      _toast(error.toString());
+      if (mounted) setState(() => _loginError = error.toString());
     } finally {
+      _elapsedTimer?.cancel();
+
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -96,8 +126,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     const HeaderBrand(compact: false),
                     const SizedBox(height: 22),
-                    const HeroPreview(),
-                    const SizedBox(height: 18),
                     AppCard(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -111,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 24),
                           const Text(
-                            'Unicore 3.0-д тавтай морил',
+                            'Unicore 4.0-д тавтай морил',
                             style: TextStyle(
                               color: AppColors.text,
                               fontSize: 23,
@@ -127,8 +155,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               fontSize: 15,
                             ),
                           ),
-                          const SizedBox(height: 20),
-                          const SegmentedLoginModes(),
                           const SizedBox(height: 20),
                           const FieldLabel('Имэйл / Нэвтрэх нэр / Утас'),
                           AppTextField(
@@ -156,28 +182,58 @@ class _LoginScreenState extends State<LoginScreen> {
                             loading: _loading,
                             onPressed: _login,
                           ),
+                          if (_loading || _loginError != null) ...[
+                            const SizedBox(height: 12),
+                            if (_loading) const LinearProgressIndicator(),
+                            const SizedBox(height: 8),
+                            Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                _loading
+                                    ? '$_loginStage ($_elapsedSeconds сек)'
+                                    : 'Нэвтрэлт амжилтгүй',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            if (_loading && _elapsedSeconds >= 10)
+                              const Text(
+                                'Хүсэлт үргэлжилж байна. Төхөөрөмж хайхад хугацаа шаардагдаж болно.',
+                                textAlign: TextAlign.center,
+                              ),
+                            if (_loginError != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                _loginError!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                              const Text(
+                                'Холболт, нэвтрэх мэдээллээ шалгаад «Нэвтрэх» товчоор дахин оролдоно уу.',
+                              ),
+                            ],
+                            if (_stages.length > 1)
+                              ExpansionTile(
+                                title: const Text('Явцын дэлгэрэнгүй'),
+                                children: [
+                                  for (final stage in _stages)
+                                    ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        stage == _loginStage
+                                            ? Icons.more_horiz
+                                            : Icons.check,
+                                      ),
+                                      title: Text(stage),
+                                    ),
+                                ],
+                              ),
+                          ],
                         ],
                       ),
                     ),
                     const Spacer(),
                     const SizedBox(height: 14),
-                    Row(
-                      children: const [
-                        Expanded(
-                          child: StoreButton(
-                            icon: CupertinoIcons.play_arrow_solid,
-                            label: 'Google Play',
-                          ),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: StoreButton(
-                            icon: Icons.apple,
-                            label: 'App Store',
-                          ),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),

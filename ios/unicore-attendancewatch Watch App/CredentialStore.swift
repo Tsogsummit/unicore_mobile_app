@@ -30,8 +30,25 @@ enum CredentialStore {
     }
 
     static func clear() {
+        if let username = get(usernameKey) { clearSession(account: username) }
         delete(usernameKey)
         delete(passwordKey)
+    }
+
+    static func saveSession(account: String, uid: String, platform: String, token: String, lookupToken: String = "") {
+        let data = ["uid": uid, "platform": platform, "token": token, "lookup_token": lookupToken]
+        if let bytes = try? JSONSerialization.data(withJSONObject: data), let text = String(data: bytes, encoding: .utf8) {
+            set(text, for: "session.tenant_65." + account.lowercased())
+        }
+    }
+
+    static func loadSession(account: String) -> [String: String]? {
+        guard let text = get("session.tenant_65." + account.lowercased()), let bytes = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: bytes)) as? [String: String]
+    }
+
+    static func clearSession(account: String) {
+        delete("session.tenant_65." + account.lowercased())
     }
 
     // MARK: - Keychain primitives

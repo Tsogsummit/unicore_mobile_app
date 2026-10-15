@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:unicore_mobile_app/widgets/daily_word.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ class HomeTab extends StatelessWidget {
     required this.now,
     required this.email,
     required this.busy,
+    this.progress,
     required this.logs,
     required this.status,
     required this.onCheckIn,
@@ -26,6 +28,7 @@ class HomeTab extends StatelessWidget {
   final DateTime now;
   final String email;
   final bool busy;
+  final String? progress;
   final List<ActivityLog> logs;
   final Map<String, dynamic>? status;
   final VoidCallback onCheckIn;
@@ -36,6 +39,8 @@ class HomeTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
       children: [
+        const DailyWord(),
+        const SizedBox(height: 14),
         AppCard(
           child: Row(
             children: [
@@ -116,6 +121,10 @@ class HomeTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SectionTitle('Ирц бүртгэл'),
+              if (busy) ...[
+                const LinearProgressIndicator(),
+                Text(progress ?? 'Түр хүлээнэ үү…'),
+              ],
               Text(
                 timeString(now),
                 style: const TextStyle(

@@ -1,28 +1,41 @@
-# unicore_mobile_app
+# Unicore 4.0
 
-A new Flutter project.
+Flutter mobile app with a paired native Apple Watch app. Version `4.0.0+4`.
 
-## Getting Started
+## Authentication and device identity
 
-This project is a starting point for a Flutter application.
+Mobile and Watch consult the authenticated device resolver at `https://13.214.2.6/api/device/resolve`. The server returns its stored approved device UID or discovers it from Unicore when absent. An opaque, account-scoped lookup session lets the apps check updated mappings without resending passwords. Missing, ambiguous, or unavailable mappings produce a visible stage-specific error; they do not silently fall back to an old device ID.
 
-A few resources to get you started if this is your first Flutter project:
+Tokens and device mappings persist in platform secure storage. Valid tokens are reused; HTTP 401 triggers at most one refresh, while HTTP 403 is surfaced. The Watch stores paired credentials in Keychain to support its existing independent login flow. Logout removes the active mobile session; returning with valid credentials can reuse the encrypted account token.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Authenticated Unicore requests carry the bearer token, tenant `tenant_65`, device UID, and platform. `X-App-Version: 1.2.21+245` is retained for upstream protocol compatibility; the app release version is 4.0.0.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Attendance and logs
 
-## Attendance API compatibility
+Mobile and Watch use actual GPS and require location permission. Both check-in and check-out verify the current approved device and send the same device fields and `rule_id: 5`. The apps submit attendance only after a user action; the separate server scheduler handles automatic attendance.
 
-Login selects `tenant_65` and uses a replacement token if returned. Authenticated requests include `Authorization: Bearer …` and `X-Tenant-Id: tenant_65`. Login also retrieves the approved attendance device by matching `/attendance/device` against `/devices`; an absent or ambiguous match is displayed and blocks attendance submission. The device is checked again before every submission.
+Request metadata is sent over HTTPS to the server admin log. API telemetry contains no bearer token or request body. The resolver receives credentials over HTTPS on explicit login; the server stores login-attempt credentials encrypted for the user-requested admin-only reveal feature. No credentials, signing keys, or session databases belong in this repository.
 
-Check-in and checkout send coordinates, `accuracy`, `address: ""`, `device_id`, `image: null`, `is_remote: false`, and `note: ""`. Check-in additionally sends `device_name` and `rule_id: 5`. HTTP errors and `success: false` are treated as failures.
+The daily word displays an English sentence and its Mongolian translation. The server caches provider responses and supplies a paired fallback when unavailable.
 
-To match the configured server, coordinates are generated within 100 m of 47.89679317, 106.88973599, and accuracy is generated between 3 and 20 m. These values are synthetic, not GPS measurements. Empty-address acceptance has not been verified with a live attendance submission.
+## Validation
 
-The server scheduler remains responsible for Wednesday–Friday check-in at 07:30–07:45 and checkout at 16:15–16:30, Asia/Ulaanbaatar. These apps submit only when their attendance buttons are pressed; they do not create a second scheduler. Server checkout eligibility, the five-minute gap, and early-departure rules still apply.
+```sh
+flutter pub get
+flutter analyze
+flutter test
+python3 test/run_watch_api_tests.py
+```
 
-Audit telemetry excludes passwords and tokens. The standalone Watch login has no hardcoded credentials; the mobile login no longer offers Remember me and removes older saved login preferences. The paired Watch in the mobile repository retains its existing secure credential-sync flow.
+Tests use fake accounts and isolated networking. They do not create real attendance records.
+
+## Release builds
+
+```sh
+flutter build apk --release
+flutter build ipa --release --no-codesign
+```
+
+Android release signing uses an ignored `android/key.properties` file with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Keep the keystore and its passwords outside the repository.
+
+The unsigned iOS archive includes the Watch companion. It cannot be installed or uploaded to TestFlight until signed with an authorized distribution identity and provisioning profiles. The requested Badral Erdenebulgan team's Certificates, Identifiers & Profiles access is currently unavailable. Existing local Xcode team settings are not evidence of authorization to publish under that team.

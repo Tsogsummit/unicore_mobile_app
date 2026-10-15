@@ -41,6 +41,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _tab = 0;
   bool _busy = false;
+  String? _busyStage;
   late Timer _timer;
   DateTime _now = DateTime.now();
   final List<ActivityLog> _logs = [];
@@ -70,14 +71,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _attendance(String type) async {
-    setState(() => _busy = true);
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _busyStage = 'Бодит байршлыг авч байна…';
+    });
     final label = type == 'check-out' ? 'Явах бүртгэл' : 'Ирэх бүртгэл';
-    final location = randomAttendanceLocation();
     try {
-      await widget.api.attendance(type, widget.token, location);
+      final location = await currentAttendanceLocation();
+      await widget.api.attendance(
+        type,
+        widget.token,
+        location,
+        onProgress: (stage) {
+          if (mounted) setState(() => _busyStage = stage);
+        },
+      );
       _addLog(
         label,
-        'Амжилттай илгээгдлээ (${location.distanceMeters.toStringAsFixed(0)}м offset)',
+        'Амжилттай илгээгдлээ (төвөөс ${location.distanceMeters.toStringAsFixed(0)}м зайд)',
         LogType.ok,
       );
 
@@ -130,6 +142,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         now: _now,
         email: widget.email,
         busy: _busy,
+        progress: _busyStage,
         logs: _logs,
         status: widget.status,
         onCheckIn: () => _attendance('check-in'),

@@ -17,10 +17,12 @@ class WatchSync {
   static Future<void> syncCredentials(String username, String password) async {
     if (!Platform.isIOS) return;
     try {
-      await _channel.invokeMethod<void>('syncCredentials', {
-        'username': username,
-        'password': password,
-      });
+      await _channel
+          .invokeMethod<void>('syncCredentials', {
+            'username': username,
+            'password': password,
+          })
+          .timeout(const Duration(seconds: 5));
     } catch (_) {
       // No paired/reachable watch — ignore.
     }

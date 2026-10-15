@@ -1,104 +1,288 @@
-import 'dart:math';
+import 'dart:convert';
+import 'package:unicore_mobile_app/services/device_resolver.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:unicore_mobile_app/models/attendance_location.dart';
+import 'package:unicore_mobile_app/services/session_store.dart';
 import 'package:unicore_mobile_app/services/unicore_api.dart';
 
-class FakeApi extends UnicoreApi {
-  final calls = <Map<String, dynamic>>[];
-  bool matchDevice = true;
+class MemoryStore implements SessionStore {
+  final data = <String, String>{};
   @override
-  Future<Map<String, dynamic>> postJson(
-    String path, {
-    String? token,
-    Map<String, Object?>? body,
-  }) async {
-    calls.add({'path': path, 'token': token, 'body': body});
-    if (path == '/auth/login')
-      return {
-        'data': {'token': 'login-token'},
-      };
-    if (path == '/auth/select-tenant')
-      return {
-        'data': {'token': 'tenant-token'},
-      };
-    return {'success': true};
+  Future<String?> read(String key) async => data[key];
+  @override
+  Future<void> write(String key, String value) async {
+    data[key] = value;
   }
 
   @override
-  Future<Map<String, dynamic>> getJson(String path, {String? token}) async {
-    if (path == '/attendance/device')
-      return {
-        'device': {
-          'status': 'approved',
-          'platform': 'ios',
-          'device_uid_masked': 'ABCD••••1234',
-        },
-      };
-    return {
-      'data': matchDevice
-          ? [
-              {'device_name': 'mobile-ios-ABCD-example-1234', 'name': 'iPhone'},
-            ]
-          : [],
-    };
+  Future<void> delete(String key) async {
+    data.remove(key);
   }
 }
 
+class Fixture {
+  final store = MemoryStore();
+  final calls = <http.Request>[];
+  int logins = 0, failure = 0, lookupStatus = 200;
+  String serverUid = uid;
+  bool approved = true, missing = false, alwaysFail = false;
+  static const uid = 'ABCD0000-1111-2222-3333-000000001234';
+  UnicoreApi api() => UnicoreApi(
+    store: store,
+    auditEnabled: false,
+    clientFactory: () => MockClient((req) async {
+      calls.add(req);
+      final path = req.url.path.replaceFirst('/api/mobile', '');
+      Object data = {'success': true};
+      int status = 200;
+      if (path == '/api/device/resolve') {
+        status = missing ? 422 : lookupStatus;
+        data = status == 200
+            ? {
+                'success': true,
+                'device_uid': serverUid,
+                'platform': 'ios',
+                'source': 'server',
+                'lookup_token': 'test-lookup-token-01234567890123456789',
+              }
+            : {
+                'success': false,
+                'stage': 'Төхөөрөмжийн жагсаалтаас бүтэн ID хайж байна…',
+                'message': 'Device lookup failed',
+              };
+      } else if (path == '/auth/login') {
+        logins++;
+        data = {
+          'data': {'token': 'login-$logins'},
+        };
+      } else if (path == '/auth/select-tenant') {
+        data = {
+          'data': {'token': 'selected-$logins'},
+        };
+      } else if (path == '/attendance/device') {
+        data = {
+          'device': {
+            'status': approved ? 'approved' : 'pending',
+            'platform': 'ios',
+            'is_current_device': approved,
+            'device_uid_masked': 'ABCD••••1234',
+          },
+        };
+      } else if (path == '/devices') {
+        data = {
+          'data': missing
+              ? []
+              : [
+                  {'device_name': 'mobile-ios-$uid'},
+                ],
+        };
+      } else if (failure != 0) {
+        status = failure;
+        data = {'message': 'denied'};
+        if (!alwaysFail) failure = 0;
+      }
+      return http.Response(
+        jsonEncode(data),
+        status,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+    }),
+  );
+}
+
+const location = AttendanceLocation(
+  latitude: 47.9,
+  longitude: 106.9,
+  accuracy: 12,
+  distanceMeters: 50,
+);
 void main() {
   test(
-    'login selects tenant, accepts rotated token, and retrieves UID',
+    'server UID is used for bound login; token restored across restart',
     () async {
-      final api = FakeApi();
-      expect(await api.login('example', 'not-real'), 'tenant-token');
-      expect(api.calls[1]['body'], {'tenant_id': 'tenant_65'});
-      expect(api.approvedDevice?['device_id'], 'ABCD-example-1234');
+      final f = Fixture();
+      final api = f.api();
+      final token = await api.login('User@Example.test', 'test-only');
+      expect(f.logins, 1);
+      expect(token, 'selected-1');
+      final login = f.calls
+          .where((r) => r.url.path.endsWith('/auth/login'))
+          .last;
+      expect(jsonDecode(login.body)['device_uid'], Fixture.uid);
+      expect(login.headers['X-Device-Id'], Fixture.uid);
+      expect(login.headers['X-App-Platform'], 'ios');
+      expect(f.store.data.values.join(), isNot(contains('test-only')));
+      final restored = f.api();
+      expect(await restored.restoreSession(), token);
+      expect(restored.account, 'user@example.test');
+      await restored.getJson('/attendance/status', token: token);
+      expect(f.logins, 1);
     },
   );
-  test('check-in and checkout have server-compatible bodies', () async {
-    final api = FakeApi();
-    for (final type in ['check-in', 'check-out']) {
-      await api.attendance(type, 'token', randomAttendanceLocation());
-      final body = api.calls.last['body'] as Map;
-      expect(api.calls.last['path'], '/attendance/$type');
-      expect(body['device_id'], 'ABCD-example-1234');
-      expect(body['address'], '');
-      expect(body['image'], isNull);
-      expect(body['is_remote'], false);
-      expect(body['note'], '');
-      expect(body['accuracy'], inInclusiveRange(3, 20));
-      expect(body.containsKey('rule_id'), type == 'check-in');
-      expect(body.containsKey('device_name'), type == 'check-in');
-      expect(body.containsKey('location_name'), false);
-    }
-  });
-  test('missing approved UID blocks attendance POST', () async {
-    final api = FakeApi()..matchDevice = false;
-    await expectLater(
-      api.attendance('check-in', 'token', randomAttendanceLocation()),
-      throwsFormatException,
+  test(
+    '401 refreshes once; old caller token uses replacement; 403 never logs in',
+    () async {
+      final f = Fixture();
+      final api = f.api();
+      final t = await api.login('user', 'test');
+      f.failure = 401;
+      await api.getJson('/attendance/status', token: t);
+      expect(f.logins, 2);
+      expect(api.currentToken, 'selected-2');
+      await api.getJson('/attendance/status', token: t);
+      expect(f.calls.last.headers['Authorization'], 'Bearer selected-2');
+      f.failure = 403;
+      await expectLater(
+        api.getJson('/attendance/status', token: t),
+        throwsA(isA<ApiException>()),
+      );
+      expect(f.logins, 2);
+      f.failure = 401;
+      f.alwaysFail = true;
+      await expectLater(
+        api.getJson('/attendance/status', token: t),
+        throwsA(isA<ApiException>()),
+      );
+      expect(f.logins, 3);
+    },
+  );
+  test(
+    'expired restored session requires login and deletes saved token',
+    () async {
+      final f = Fixture();
+      final a = f.api();
+      await a.login('user', 'test');
+      final b = f.api();
+      final t = await b.restoreSession();
+      f.failure = 401;
+      await expectLater(
+        b.getJson('/attendance/status', token: t),
+        throwsA(isA<ApiException>()),
+      );
+      expect(b.currentToken, isNull);
+      expect(f.logins, 1);
+      expect(await f.api().restoreSession(), isNull);
+    },
+  );
+  test(
+    'check-in and check-out use matching headers, device UID and actual location',
+    () async {
+      final f = Fixture();
+      final a = f.api();
+      final t = await a.login('user', 'test');
+      for (final type in ['check-in', 'check-out']) {
+        await a.attendance(type, t, location);
+        final req = f.calls.last;
+        final body = jsonDecode(req.body);
+        expect(req.url.path.endsWith(type), isTrue);
+        expect(body['device_id'], Fixture.uid);
+        expect(req.headers['X-Device-Id'], Fixture.uid);
+        expect(body['latitude'], 47.9);
+        expect(body['device_name'], 'ios');
+        expect(body['rule_id'], 5);
+      }
+      f.approved = false;
+      final before = f.calls.length;
+      await expectLater(
+        a.attendance('check-out', t, location),
+        throwsFormatException,
+      );
+      expect(
+        f.calls.length,
+        before + 2,
+      ); // Server lookup and device check only; no attendance POST.
+    },
+  );
+  test(
+    'logout/login reuses the saved token without another upstream login',
+    () async {
+      final f = Fixture();
+      final a = f.api();
+      final first = await a.login('user', 'test');
+      await a.logout();
+      expect(await f.api().restoreSession(), isNull);
+      final second = await f.api().login('user', 'test');
+      expect(second, first);
+      expect(f.logins, 1);
+    },
+  );
+  test(
+    'missing UID blocks bound login and account sessions stay isolated',
+    () async {
+      final f = Fixture()..missing = true;
+      await expectLater(
+        f.api().login('unknown', 'test'),
+        throwsA(isA<DeviceLookupException>()),
+      );
+      expect(f.logins, 0);
+      f.missing = false;
+      final a = f.api();
+      await a.login('first', 'test');
+      final before = f.logins;
+      await a.login('second', 'test');
+      expect(f.logins, before + 1);
+      await a.login('first', 'test');
+      expect(f.logins, before + 1);
+    },
+  );
+  test('changed server UID replaces cached UID and cached token', () async {
+    final f = Fixture();
+    final api = f.api();
+    await api.login('user', 'test');
+    f.serverUid = 'D824C39C-ECEA-4CA3-86E2-135021441BF0';
+    await api.login('user', 'test');
+    expect(f.logins, 2);
+    final request = f.calls.lastWhere(
+      (r) => r.url.path.endsWith('/auth/login'),
     );
-    expect(api.calls, isEmpty);
+    expect(jsonDecode(request.body)['device_uid'], f.serverUid);
+  });
+  test('server failure does not fall back to stale cached UID', () async {
+    final f = Fixture();
+    final api = f.api();
+    await api.login('user', 'test');
+    f.lookupStatus = 503;
+    final before = f.logins;
+    await expectLater(
+      api.login('user', 'test'),
+      throwsA(
+        isA<DeviceLookupException>().having(
+          (e) => e.stage,
+          'stage',
+          contains('бүтэн ID'),
+        ),
+      ),
+    );
+    expect(f.logins, before);
+    expect(f.calls.last.url.path, '/api/device/resolve');
+  });
+  test('server failure blocks attendance before any Unicore POST', () async {
+    final f = Fixture();
+    final api = f.api();
+    final token = await api.login('user', 'test');
+    f.lookupStatus = 503;
+    final before = f.calls.length;
+    await expectLater(
+      api.attendance('check-in', token, location),
+      throwsA(isA<DeviceLookupException>()),
+    );
+    expect(f.calls.length, before + 1);
+    expect(f.calls.last.url.path, '/api/device/resolve');
+    expect(jsonDecode(f.calls.last.body).containsKey('password'), isFalse);
   });
   test(
-    'missing UID does not invalidate login, but exposes lookup error',
+    'restart checks server and requires login when mapping changed',
     () async {
-      final api = FakeApi()..matchDevice = false;
-      expect(await api.login('example', 'not-real'), 'tenant-token');
-      expect(api.approvedDevice, isNull);
-      expect(api.deviceError, isNotNull);
+      final f = Fixture();
+      await f.api().login('user', 'test');
+      f.serverUid = 'NEW-SERVER-ID';
+      await expectLater(
+        f.api().restoreSession(),
+        throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)),
+      );
+      expect(f.calls.last.url.path, '/api/device/resolve');
     },
   );
-  test('serialized coordinates remain within office 100 m radius', () {
-    for (var i = 0; i < 10000; i++) {
-      final body = randomAttendanceLocation().toJson();
-      final lat1 = 47.89679317 * pi / 180;
-      final lat2 = (body['latitude'] as double) * pi / 180;
-      final dl = ((body['longitude'] as double) - 106.88973599) * pi / 180;
-      final h =
-          pow(sin((lat2 - lat1) / 2), 2) +
-          cos(lat1) * cos(lat2) * pow(sin(dl / 2), 2);
-      expect(6371000 * 2 * asin(sqrt(h)), lessThanOrEqualTo(100));
-      expect(body['accuracy'], inInclusiveRange(3, 20));
-    }
-  });
 }
