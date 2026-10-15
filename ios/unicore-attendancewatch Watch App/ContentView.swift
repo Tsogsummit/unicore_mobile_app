@@ -553,7 +553,7 @@ final class UnicoreWatchAPI {
             "endpoint": path, "method": method, "http_status": status as Any? ?? NSNull(),
             "duration_ms": duration, "success": status.map { (200..<300).contains($0) } ?? false,
             "location_name": "\(method) \(path) → \(status.map(String.init) ?? "network error")",
-            "device_info": "unicore_watch_app v4.0.1", "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "device_info": "unicore_watch_app v4.0.2", "timestamp": ISO8601DateFormatter().string(from: Date()),
         ]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)

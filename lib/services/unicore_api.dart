@@ -65,27 +65,47 @@ class UnicoreApi {
     _passwordSalt = _passwordDigest = null;
     approvedDevice = null;
     deviceError = null;
-    final raw = await _store.read(_key(account));
-    if (raw != null) {
-      try {
-        final data = jsonDecode(raw) as Map<String, dynamic>;
-        _uid = data['uid'] as String?;
-        _lookupToken = data['lookup_token'] as String?;
-        _token = data['token'] as String?;
-        _passwordSalt = data['password_salt'] as String?;
-        _passwordDigest = data['password_digest'] as String?;
-        _platform = data['platform'] as String? ?? 'ios';
-        if (_uid != null) {
-          approvedDevice = {'device_id': _uid!, 'device_name': _platform};
-        }
-      } on FormatException {
-        await _store.delete(_key(account));
+    String? raw;
+    try {
+      raw = await _store.read(_key(account));
+    } catch (_) {
+      // An unreadable Keychain is treated as an empty cache; the server
+      // remains the source of truth and a password login rebuilds it.
+      return;
+    }
+    if (raw == null) return;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final uid = data['uid'] as String?;
+      final lookupToken = data['lookup_token'] as String?;
+      final token = data['token'] as String?;
+      final salt = data['password_salt'] as String?;
+      final digest = data['password_digest'] as String?;
+      final platform = data['platform'] as String? ?? 'ios';
+      _uid = uid;
+      _lookupToken = lookupToken;
+      _token = token;
+      _passwordSalt = salt;
+      _passwordDigest = digest;
+      _platform = platform;
+      if (uid != null) {
+        approvedDevice = {'device_id': uid, 'device_name': platform};
       }
+    } catch (_) {
+      // Malformed or wrongly typed cache from an older build.
+      try {
+        await _store.delete(_key(account));
+      } catch (_) {}
     }
   }
 
   Future<String?> restoreSession() async {
-    final account = await _store.read('unicore.active.v2');
+    String? account;
+    try {
+      account = await _store.read('unicore.active.v2');
+    } catch (_) {
+      return null;
+    }
     if (account == null) return null;
     _password = null;
     await _load(account);
@@ -206,8 +226,13 @@ class UnicoreApi {
         _token = await _authenticate();
       }
       report('Нэвтрэлтийг утсанд хадгалж байна…');
-      await _rememberPasswordProof(password);
-      await _save();
+      try {
+        await _rememberPasswordProof(password);
+        await _save();
+      } catch (_) {
+        // Keychain write failed: keep this session in memory instead of
+        // rejecting a login the server already accepted.
+      }
       return _token!;
     } on DeviceLookupException {
       rethrow;
@@ -418,7 +443,7 @@ class UnicoreApi {
             'duration_ms': duration,
             'success': status != null && status >= 200 && status < 300,
             'location_name': '$method $path → ${status ?? "network error"}',
-            'device_info': 'unicore_mobile_app v4.0.0',
+            'device_info': 'unicore_mobile_app v4.0.2',
             'timestamp': DateTime.now().toUtc().toIso8601String(),
           }),
         ),
@@ -536,7 +561,7 @@ class UnicoreApi {
       'location_name': 'Tselmeg Digital International School',
       'distance_meters': location.distanceMeters,
       'timestamp': DateTime.now().toIso8601String(),
-      'device_info': 'unicore_mobile_app v4.0.0',
+      'device_info': 'unicore_mobile_app v4.0.2',
     };
 
     request.add(utf8.encode(jsonEncode(body)));

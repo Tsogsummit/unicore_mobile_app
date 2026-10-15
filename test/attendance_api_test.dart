@@ -9,10 +9,16 @@ import 'package:unicore_mobile_app/services/unicore_api.dart';
 
 class MemoryStore implements SessionStore {
   final data = <String, String>{};
+  bool failReads = false, failWrites = false;
   @override
-  Future<String?> read(String key) async => data[key];
+  Future<String?> read(String key) async {
+    if (failReads) throw Exception('Keychain unavailable');
+    return data[key];
+  }
+
   @override
   Future<void> write(String key, String value) async {
+    if (failWrites) throw Exception('Keychain unavailable');
     data[key] = value;
   }
 
@@ -287,6 +293,26 @@ void main() {
       expect(f.logins, before + 1);
     },
   );
+  test('unreadable or unwritable Keychain does not block login', () async {
+    final f = Fixture();
+    f.store.failReads = true;
+    f.store.failWrites = true;
+    expect(await f.api().restoreSession(), isNull);
+    expect(await f.api().login('user', 'test'), 'selected-1');
+    f.store.failReads = f.store.failWrites = false;
+    expect(await f.api().login('user', 'test'), 'selected-2');
+  });
+  test('malformed or wrongly typed cache is discarded on login', () async {
+    final f = Fixture();
+    final api = f.api();
+    await api.login('user', 'test');
+    final key = f.store.data.keys.firstWhere((k) => k.contains('session'));
+    for (final bad in ['{not json', '{"uid": 42, "token": []}', '[]']) {
+      f.store.data[key] = bad;
+      expect(await f.api().login('user', 'test'), startsWith('selected-'));
+      expect(jsonDecode(f.store.data[key]!)['uid'], f.serverUid);
+    }
+  });
   test('changed server UID replaces cached UID and cached token', () async {
     final f = Fixture();
     final api = f.api();
