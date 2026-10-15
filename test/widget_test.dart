@@ -36,6 +36,9 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
     final api = PendingApi();
     await tester.pumpWidget(
       MaterialApp(

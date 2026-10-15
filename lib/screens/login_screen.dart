@@ -8,6 +8,7 @@ import 'package:unicore_mobile_app/theme/app_theme.dart';
 import 'package:unicore_mobile_app/widgets/branding.dart';
 import 'package:unicore_mobile_app/widgets/buttons.dart';
 import 'package:unicore_mobile_app/widgets/cards.dart';
+import 'package:unicore_mobile_app/widgets/daily_word.dart';
 import 'package:unicore_mobile_app/widgets/inputs.dart';
 import 'package:unicore_mobile_app/widgets/tiles.dart';
 
@@ -125,7 +126,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const HeaderBrand(compact: false),
-                    const SizedBox(height: 22),
+                    const SizedBox(height: 18),
+                    const DailyWord(),
+                    const SizedBox(height: 18),
                     AppCard(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,

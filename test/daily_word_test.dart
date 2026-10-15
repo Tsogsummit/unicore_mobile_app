@@ -30,7 +30,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Өнөөдрийн үг'), findsOneWidget);
+    expect(find.text('ӨНӨӨДРИЙН ҮГ'), findsOneWidget);
     expect(find.text('Keep learning.'), findsOneWidget);
     expect(find.text('Үргэлж суралцаарай.'), findsOneWidget);
     expect(
@@ -38,6 +38,30 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Үргэлж суралцаарай.')).dy),
     );
     expect(find.text('Advice Slip'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('remounting reuses the same day\'s word without refetching', (
+    tester,
+  ) async {
+    var calls = 0;
+    Widget word() => MaterialApp(
+      home: Scaffold(
+        body: DailyWord(
+          clientFactory: () => MockClient((_) async {
+            calls++;
+            return http.Response('{}', 500);
+          }),
+        ),
+      ),
+    );
+    await tester.pumpWidget(word());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(word());
+    await tester.pumpAndSettle();
+    expect(calls, 0);
+    expect(find.text('Keep learning.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }
