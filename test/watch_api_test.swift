@@ -16,6 +16,9 @@
         do { try await b.attendance(type:.checkOut,token:token,credentials:credentials,location:AttendanceLocation());fatalError("403 swallowed") }
         catch WatchAPIError.http(let code,_) { precondition(code==403) }
         precondition(MockProtocol.logins==2)
+        MockProtocol.resolves = []; MockProtocol.expireLookup = true
+        try await b.attendance(type:.checkOut,token:token,credentials:credentials,location:AttendanceLocation())
+        precondition(MockProtocol.resolves == [true, false] && MockProtocol.posts == 2 && MockProtocol.logins == 2)
         MockProtocol.serverUID = "D824C39C-ECEA-4CA3-86E2-135021441BF0"
         _ = try await b.login(credentials: credentials)
         precondition(MockProtocol.logins == 3)
@@ -27,6 +30,6 @@
             precondition(error.localizedDescription.contains("Server lookup"))
         }
         precondition(MockProtocol.logins == 3)
-        print("PASS: server ID, cached login, changed ID, stage errors, 401 retry and 403 preservation; no real requests")
+        print("PASS: server ID, cached login, changed ID, stage errors, 401 retry, expired lookup session renewal and 403 preservation; no real requests")
     }
 }

@@ -513,7 +513,14 @@ final class UnicoreWatchAPI {
     }
 
     func attendance(type: AttendanceType, token: String, credentials: WatchCredentials, location: AttendanceLocation, progress: @escaping (String) -> Void = { _ in }) async throws {
-        let device = try await resolveFromServer(credentials: credentials, progress: progress, lookupToken: lookupToken)
+        let device: (id: String, platform: String, lookupToken: String)
+        do {
+            device = try await resolveFromServer(credentials: credentials, progress: progress, lookupToken: lookupToken)
+        } catch WatchAPIError.http(401, _) where lookupToken?.isEmpty == false {
+            // The 30-day server session expired; the synced phone credentials open a new one.
+            progress("Серверийн session-ийг сэргээж байна…")
+            device = try await resolveFromServer(credentials: credentials, progress: progress)
+        }
         lookupToken = device.lookupToken
         if uid != device.id || platform != device.platform {
             uid = device.id; platform = device.platform
@@ -546,7 +553,7 @@ final class UnicoreWatchAPI {
             "endpoint": path, "method": method, "http_status": status as Any? ?? NSNull(),
             "duration_ms": duration, "success": status.map { (200..<300).contains($0) } ?? false,
             "location_name": "\(method) \(path) → \(status.map(String.init) ?? "network error")",
-            "device_info": "unicore_watch_app v4.0.0", "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "device_info": "unicore_watch_app v4.0.1", "timestamp": ISO8601DateFormatter().string(from: Date()),
         ]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
