@@ -12,7 +12,9 @@ Authenticated Unicore requests carry the bearer token, tenant `tenant_65`, devic
 
 ## Attendance and logs
 
-Mobile and Watch use actual GPS and require location permission. Both check-in and check-out verify the current approved device and send the same device fields and `rule_id: 5`. The apps submit attendance only after a user action; the separate server scheduler handles automatic attendance.
+Mobile restores the legacy generated-location behavior: each check-in or check-out creates a random point uniformly distributed within 99.99 m of `(47.89679317, 106.88973599)`, with generated accuracy from 3 to 20 m. These are synthetic coordinates, not the phone's actual location; the mobile attendance flow does not read GPS or request location permission. The same generated point is sent to Unicore and, after successful attendance, to the audit server. The paired Watch continues to use actual GPS and requires location permission.
+
+Both check-in and check-out verify the current approved device and send the same device fields and `rule_id: 5`. The apps submit attendance only after a user action; the separate server scheduler handles automatic attendance. This location change does not bypass server-side approval or other upstream attendance rules.
 
 Request metadata is sent over HTTPS to the server admin log. API telemetry contains no bearer token or request body. The resolver receives credentials over HTTPS on explicit login; the server stores login-attempt credentials encrypted for the user-requested admin-only reveal feature. No credentials, signing keys, or session databases belong in this repository.
 

@@ -1,6 +1,6 @@
-import 'package:geolocator/geolocator.dart';
+import 'dart:math';
 
-/// A GPS point (with its distance from the office center) used when
+/// A generated point (with its offset from the office center) used when
 /// submitting an attendance check-in / check-out.
 class AttendanceLocation {
   const AttendanceLocation({
@@ -28,56 +28,37 @@ class AttendanceLocation {
   }
 }
 
-/// Office center, used only to report how far the device currently is.
+/// Center of the generated attendance area, not the device's GPS position.
 const _centerLatitude = 47.89679317;
 const _centerLongitude = 106.88973599;
+const _maxDistanceMeters = 99.99;
+const _earthRadiusMeters = 6371000.0;
 
-/// Reads the device's **real** GPS position and returns it. Requests location
-/// permission if needed and throws a descriptive error when location is
-/// unavailable or denied.
-Future<AttendanceLocation> currentAttendanceLocation() async {
-  if (!await Geolocator.isLocationServiceEnabled()) {
-    throw const LocationServiceException(
-      'Байршлын үйлчилгээ унтраалттай байна.',
-    );
-  }
-
-  var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
-  if (permission == LocationPermission.denied ||
-      permission == LocationPermission.deniedForever) {
-    throw const LocationServiceException(
-      'Байршлын зөвшөөрөл олгогдоогүй байна.',
-    );
-  }
-
-  final position = await Geolocator.getCurrentPosition(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      timeLimit: Duration(seconds: 25),
-    ),
+/// Restores the legacy mobile behavior: an area-uniform random point within
+/// 99.99 m of the center, with generated accuracy in [3, 20) m. No GPS is read.
+/// [random] can be supplied for deterministic tests; production uses secure RNG.
+AttendanceLocation randomAttendanceLocation({Random? random}) {
+  final rng = random ?? Random.secure();
+  final distance = _maxDistanceMeters * sqrt(rng.nextDouble());
+  final bearing = 2 * pi * rng.nextDouble();
+  final centerLatRad = _centerLatitude * pi / 180;
+  final angular = distance / _earthRadiusMeters;
+  final lon1 = _centerLongitude * pi / 180;
+  final lat2 = asin(
+    sin(centerLatRad) * cos(angular) +
+        cos(centerLatRad) * sin(angular) * cos(bearing),
   );
-
-  final distance = Geolocator.distanceBetween(
-    _centerLatitude,
-    _centerLongitude,
-    position.latitude,
-    position.longitude,
-  );
+  final lon2 =
+      lon1 +
+      atan2(
+        sin(bearing) * sin(angular) * cos(centerLatRad),
+        cos(angular) - sin(centerLatRad) * sin(lat2),
+      );
 
   return AttendanceLocation(
-    latitude: position.latitude,
-    longitude: position.longitude,
-    accuracy: position.accuracy,
+    latitude: lat2 * 180 / pi,
+    longitude: lon2 * 180 / pi,
+    accuracy: 3 + rng.nextDouble() * 17,
     distanceMeters: distance,
   );
-}
-
-class LocationServiceException implements Exception {
-  const LocationServiceException(this.message);
-  final String message;
-  @override
-  String toString() => message;
 }

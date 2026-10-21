@@ -74,11 +74,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_busy) return;
     setState(() {
       _busy = true;
-      _busyStage = 'Бодит байршлыг авч байна…';
+      _busyStage = 'Байршлын өгөгдөл үүсгэж байна…';
     });
     final label = type == 'check-out' ? 'Явах бүртгэл' : 'Ирэх бүртгэл';
     try {
-      final location = await currentAttendanceLocation();
+      final location = randomAttendanceLocation();
       await widget.api.attendance(
         type,
         widget.token,
@@ -89,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       _addLog(
         label,
-        'Амжилттай илгээгдлээ (төвөөс ${location.distanceMeters.toStringAsFixed(0)}м зайд)',
+        'Амжилттай илгээгдлээ (үүсгэсэн цэг: төвөөс ${location.distanceMeters.toStringAsFixed(0)}м)',
         LogType.ok,
       );
 

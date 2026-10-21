@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:unicore_mobile_app/services/device_resolver.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -233,19 +234,24 @@ void main() {
     },
   );
   test(
-    'check-in and check-out use matching headers, device UID and actual location',
+    'check-in and check-out preserve generated location and approved device',
     () async {
       final f = Fixture();
       final a = f.api();
       final t = await a.login('user', 'test');
       for (final type in ['check-in', 'check-out']) {
-        await a.attendance(type, t, location);
+        final generated = randomAttendanceLocation(
+          random: Random(type == 'check-in' ? 7 : 8),
+        );
+        await a.attendance(type, t, generated);
         final req = f.calls.last;
         final body = jsonDecode(req.body);
         expect(req.url.path.endsWith(type), isTrue);
         expect(body['device_id'], Fixture.uid);
         expect(req.headers['X-Device-Id'], Fixture.uid);
-        expect(body['latitude'], 47.9);
+        for (final entry in generated.toJson().entries) {
+          expect(body[entry.key], entry.value);
+        }
         expect(body['device_name'], 'ios');
         expect(body['rule_id'], 5);
       }
