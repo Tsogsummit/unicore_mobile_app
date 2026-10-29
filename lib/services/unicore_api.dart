@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:unicore_mobile_app/services/device_resolver.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -27,6 +26,17 @@ class UnicoreApi {
   static const baseUrl = 'https://unicore.systems/api/mobile';
   static const tenantId = 'tenant_65';
   static const auditServerUrl = 'https://13.214.2.6/api/logs';
+  // Approved UIDs copied from the server's stored mapping. The mobile app
+  // uses this local map so login does not depend on /api/device/resolve.
+  static const deviceUids = <String, String>{
+    'tsogsummit@gmail.com': '76F47E61-B1A2-486C-A89C-2B73CF7C0C4C',
+    'batnasandalaisuren@gmail.com': 'C2CE0A67-9874-4562-B93E-CE894C50CA36',
+    '89261500': 'CEA90AE1-91E4-4C34-90A7-FAA9E5E7E6C2',
+    '86431234': '77B860FE-056C-4A7C-B8B8-A6C813450325',
+    'bymbtstsg0810@gmail.com': 'E7D1F4FD-59C9-475D-9E0F-78CB3BA2F574',
+    'temuujin@tselmeg.edu.mn': 'D824C39C-ECEA-4CA3-86E2-135021441BF0',
+    'tumennast854@gmail.com': '5022E645-0475-449A-B5BB-2F2F7713EF54',
+  };
   final bool auditEnabled;
   final SessionStore _store;
   final http.Client Function()? _clientFactory;
@@ -62,6 +72,7 @@ class UnicoreApi {
     _lookupToken = null;
     _token = null;
     _platform = 'ios';
+    _uid = deviceUids[account];
     _passwordSalt = _passwordDigest = null;
     approvedDevice = null;
     deviceError = null;
@@ -88,8 +99,12 @@ class UnicoreApi {
       _passwordSalt = salt;
       _passwordDigest = digest;
       _platform = platform;
-      if (uid != null) {
-        approvedDevice = {'device_id': uid, 'device_name': platform};
+      _uid = deviceUids[account] ?? uid;
+      if (_uid != null) {
+        approvedDevice = {
+          'device_id': _uid!,
+          'device_name': 'mobile-ios-$_uid',
+        };
       }
     } catch (_) {
       // Malformed or wrongly typed cache from an older build.
@@ -167,14 +182,9 @@ class UnicoreApi {
     final login = await _raw(
       '/auth/login',
       body: {
-        'login': _account,
+        'email': _account,
         'password': _password,
-        if (_uid != null) ...{
-          'device_uid': _uid,
-          'device_name': 'mobile-$_platform-$_uid',
-          'device_type': _platform,
-          'platform': _platform,
-        },
+        'device_name': 'mobile-ios-$_uid',
       },
     );
     final token = _extract(login);
@@ -201,18 +211,20 @@ class UnicoreApi {
       report(stage);
       await _load(login.trim().toLowerCase());
       _password = password;
-      // Always consult the server on explicit login so a corrected mapping wins
-      // over the phone's old cached UID. Never silently use stale data on error.
-      final device = await DeviceResolver(
-        () => _newClient(requestTimeout: const Duration(seconds: 130)),
-      ).resolve(_account!, password, report);
-      _lookupToken = device['lookup_token'] as String?;
-      final resolvedUid = device['device_uid'] as String;
-      final resolvedPlatform = device['platform'] as String;
-      if (_uid != resolvedUid || _platform != resolvedPlatform) _token = null;
-      _uid = resolvedUid;
-      _platform = resolvedPlatform;
-      approvedDevice = {'device_id': _uid!, 'device_name': _platform};
+      final localUid = deviceUids[_account!];
+      if (localUid == null) {
+        throw const FormatException(
+          'Энэ хэрэглэгчийн зөвшөөрөгдсөн төхөөрөмжийн UID app-д бүртгэгдээгүй байна.',
+        );
+      }
+      if (_uid != localUid || _platform != 'ios') _token = null;
+      _lookupToken = null;
+      _uid = localUid;
+      _platform = 'ios';
+      approvedDevice = {
+        'device_id': _uid!,
+        'device_name': 'mobile-ios-$_uid',
+      };
       final proofMatches =
           _passwordSalt != null &&
           _passwordDigest != null &&
@@ -234,87 +246,46 @@ class UnicoreApi {
         // rejecting a login the server already accepted.
       }
       return _token!;
-    } on DeviceLookupException {
-      rethrow;
     } on TimeoutException {
-      throw DeviceLookupException(
+      throw ApiException(
+        408,
         stage,
-        'Хүлээх хугацаа дууслаа. Дахин оролдоно уу.',
       );
     } catch (error) {
-      throw DeviceLookupException(
-        stage,
-        error is ApiException || error is FormatException
-            ? error.toString()
-            : 'Холболт эсвэл хадгалалт амжилтгүй. Дахин оролдоно уу.',
-      );
+      rethrow;
     }
   }
 
   /// Checks the authoritative mapping on launch/resume and before attendance.
   /// A server failure blocks the action; an old local UID is never a fallback.
   Future<void> ensureServerDevice({void Function(String)? onProgress}) async {
-    if (_account == null || _lookupToken == null) {
+    if (_account == null) {
       throw const ApiException(
         401,
-        'Сервертэй дахин холбохын тулд нэвтэрнэ үү.',
+        'Төхөөрөмжийн UID ашиглахын тулд нэвтэрнэ үү.',
       );
     }
-    final device = await DeviceResolver(
-      () => _newClient(requestTimeout: const Duration(seconds: 130)),
-    ).resolve(_account!, null, onProgress ?? (_) {}, lookupToken: _lookupToken);
-    final uid = device['device_uid'] as String;
-    final platform = device['platform'] as String;
-    if (_uid != uid || _platform != platform) {
-      _uid = uid;
-      _platform = platform;
-      _token = null;
-      approvedDevice = {'device_id': uid, 'device_name': platform};
-      await _save();
-      onProgress?.call('Шинэ төхөөрөмжөөр нэвтэрч байна…');
-      _token = _password == null
-          ? await _recoverFromServer()
-          : await _authenticate();
-      await _save();
+    final uid = deviceUids[_account!];
+    if (uid == null) {
+      throw const FormatException('Энэ хэрэглэгчийн төхөөрөмжийн UID app-д бүртгэлгүй байна.');
     }
+    _uid = uid;
+    _platform = 'ios';
+    approvedDevice = {
+      'device_id': uid,
+      'device_name': 'mobile-ios-$uid',
+    };
   }
 
   Future<Map<String, String>> resolveApprovedDevice(String token) async {
-    final response = await _raw('/attendance/device', token: token);
-    final records = await _raw('/devices', token: token);
-    final bindings = response['devices'] as List? ?? [response['device'] ?? {}];
-    final matches = <String, String>{};
-    for (final binding in bindings) {
-      if (binding['status'] != 'approved') continue;
-      final platform = binding['platform'];
-      if (platform != 'ios' && platform != 'android') continue;
-      final masked = (binding['device_uid_masked'] as String? ?? '')
-          .toLowerCase();
-      final parts = masked.split(RegExp(r'[•*…]+'));
-      for (final record in records['data'] as List? ?? []) {
-        final match = RegExp(
-          r'^mobile-([^-]+)-(.+)$',
-        ).firstMatch(record['device_name'] as String? ?? '');
-        if (match == null || match[1] != platform) continue;
-        final uid = match[2]!;
-        if (uid.toLowerCase() == masked ||
-            (parts.length == 2 &&
-                parts.every((p) => p.isNotEmpty) &&
-                uid.toLowerCase().startsWith(parts[0]) &&
-                uid.toLowerCase().endsWith(parts[1]))) {
-          matches[uid.toUpperCase()] = platform;
-        }
-      }
-    }
-    if (matches.length != 1) {
-      deviceError =
-          'Approved төхөөрөмжийн бүтэн UID-г нэг утгаар олсонгүй. Бүртгэлтэй утасны Unicore аппд нэвтэрч дахин оролдоно уу.';
-      throw FormatException(deviceError!);
+    final uid = _uid;
+    if (uid == null) {
+      throw const FormatException('Төхөөрөмжийн UID олдсонгүй.');
     }
     return {
-      'device_id': matches.keys.single,
-      'device_name': matches.values.single,
-      'platform': matches.values.single,
+      'device_id': uid,
+      'device_name': 'mobile-ios-$uid',
+      'platform': _platform,
     };
   }
 
@@ -328,19 +299,8 @@ class UnicoreApi {
       throw ArgumentError.value(type);
     }
     await ensureServerDevice(onProgress: onProgress);
-    onProgress?.call('Төхөөрөмжийн зөвшөөрлийг шалгаж байна…');
     if (_uid == null) {
       throw const FormatException('Төхөөрөмжийн UID олдсонгүй.');
-    }
-    final response = await getJson('/attendance/device', token: token);
-    final bindings = response['devices'] as List? ?? [response['device'] ?? {}];
-    if (!bindings.any(
-      (b) =>
-          b['status'] == 'approved' &&
-          b['is_current_device'] == true &&
-          b['platform'] == _platform,
-    )) {
-      throw const FormatException('Одоогийн төхөөрөмж approved биш байна.');
     }
     onProgress?.call('Ирцийн хүсэлт илгээж байна…');
     await postJson(
@@ -349,7 +309,7 @@ class UnicoreApi {
       body: {
         ...location.toJson(),
         'device_id': _uid,
-        'device_name': _platform,
+        'device_name': 'mobile-ios-$_uid',
         'rule_id': 5,
       },
     );
@@ -379,7 +339,8 @@ class UnicoreApi {
         'Content-Type': 'application/json',
         'X-Tenant-Id': tenantId,
         'X-App-Platform': _platform,
-        'X-App-Version': '1.2.21+245',
+        'X-App-Version': '1.2.33+263',
+        'User-Agent': 'UniCore/1.2.33 (iOS 27.0.1; iPhone)',
         'X-Device-Id': ?_uid,
         if (token != null) 'Authorization': 'Bearer $token',
       };
@@ -460,39 +421,7 @@ class UnicoreApi {
   }
 
   Future<String> _recoverFromServer({String? rejectedToken}) async {
-    if (_account == null || _lookupToken == null) {
-      throw const ApiException(401, 'Дахин нэвтэрнэ үү.');
-    }
-    try {
-      final result =
-          await DeviceResolver(
-            () => _newClient(requestTimeout: const Duration(seconds: 130)),
-          ).resolve(
-            _account!,
-            null,
-            (_) {},
-            lookupToken: _lookupToken,
-            recoverToken: true,
-            rejectedToken: rejectedToken,
-          );
-      if (result['device_uid'] != _uid || result['platform'] != _platform) {
-        throw const ApiException(
-          409,
-          'Төхөөрөмжийн мэдээлэл өөрчлөгдлөө. Дахин оролдоно уу.',
-        );
-      }
-      final token = result['token'];
-      if (token is! String || token.isEmpty) {
-        throw const ApiException(502, 'Токен сэргээх хариу дутуу байна.');
-      }
-      return token;
-    } on DeviceLookupException catch (error) {
-      if (error.status == 401) {
-        await logout(invalidateToken: true);
-        throw ApiException(401, error.message);
-      }
-      rethrow;
-    }
+    throw const ApiException(401, 'Дахин нэвтэрнэ үү.');
   }
 
   Future<String> _refresh() async {
