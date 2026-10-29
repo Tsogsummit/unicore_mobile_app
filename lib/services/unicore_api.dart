@@ -211,7 +211,8 @@ class UnicoreApi {
       report(stage);
       await _load(login.trim().toLowerCase());
       _password = password;
-      final localUid = deviceUids[_account!];
+      final remoteUids = await _remoteDeviceUids();
+      final localUid = remoteUids[_account!] ?? deviceUids[_account!];
       if (localUid == null) {
         throw const FormatException(
           'Энэ хэрэглэгчийн зөвшөөрөгдсөн төхөөрөмжийн UID app-д бүртгэгдээгүй байна.',
@@ -265,7 +266,8 @@ class UnicoreApi {
         'Төхөөрөмжийн UID ашиглахын тулд нэвтэрнэ үү.',
       );
     }
-    final uid = deviceUids[_account!];
+    final remoteUids = await _remoteDeviceUids();
+    final uid = remoteUids[_account!] ?? deviceUids[_account!];
     if (uid == null) {
       throw const FormatException('Энэ хэрэглэгчийн төхөөрөмжийн UID app-д бүртгэлгүй байна.');
     }
@@ -275,6 +277,26 @@ class UnicoreApi {
       'device_id': uid,
       'device_name': 'mobile-ios-$uid',
     };
+  }
+
+  Future<Map<String, String>> _remoteDeviceUids() async {
+    final client = _newClient(requestTimeout: const Duration(seconds: 10));
+    try {
+      final response = await client
+          .get(Uri.parse('https://13.214.2.6/api/device/map'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return const {};
+      final decoded = jsonDecode(response.body);
+      final raw = decoded is Map ? decoded['devices'] : null;
+      if (raw is! Map) return const {};
+      return raw.map(
+        (key, value) => MapEntry(key.toString().trim().toLowerCase(), value.toString()),
+      );
+    } catch (_) {
+      return const {};
+    } finally {
+      client.close();
+    }
   }
 
   Future<Map<String, String>> resolveApprovedDevice(String token) async {
