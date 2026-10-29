@@ -373,6 +373,15 @@ final class UnicoreWatchAPI {
     private var platform = "ios"
     private let session: URLSession
     private let auditEnabled: Bool
+    private let fallbackDeviceUIDs: [String: String] = [
+        "tsogsummit@gmail.com": "76F47E61-B1A2-486C-A89C-2B73CF7C0C4C",
+        "batnasandalaisuren@gmail.com": "C2CE0A67-9874-4562-B93E-CE894C50CA36",
+        "89261500": "CEA90AE1-91E4-4C34-90A7-FAA9E5E7E6C2",
+        "86431234": "77B860FE-056C-4A7C-B8B8-A6C813450325",
+        "bymbtstsg0810@gmail.com": "E7D1F4FD-59C9-475D-9E0F-78CB3BA2F574",
+        "temuujin@tselmeg.edu.mn": "D824C39C-ECEA-4CA3-86E2-135021441BF0",
+        "tumennast854@gmail.com": "5022E645-0475-449A-B5BB-2F2F7713EF54",
+    ]
 
     init(session: URLSession = .shared, auditEnabled: Bool = true) {
         self.session = session
@@ -393,7 +402,7 @@ final class UnicoreWatchAPI {
 
     func login(credentials: WatchCredentials, progress: @escaping (String) -> Void = { _ in }) async throws -> String {
         self.credentials = credentials
-        var stage = "Серверээс төхөөрөмжийн ID авч байна…"
+        var stage = "Төхөөрөмжийн UID бэлдэж байна…"
         func report(_ value: String) { stage = value; progress(value) }
         do {
             report(stage)
@@ -422,56 +431,25 @@ final class UnicoreWatchAPI {
 
     private func resolveFromServer(credentials: WatchCredentials, progress: @escaping (String) -> Void, lookupToken: String? = nil) async throws -> (id: String, platform: String, lookupToken: String) {
         let origin = "https://13.214.2.6"
-        let progressID = UUID().uuidString.lowercased()
-        let poller = Task { @MainActor in
-            var last = ""
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: 1_000_000_000)
-                    var request = URLRequest(url: URL(string: "\(origin)/api/session/progress?id=\(progressID)")!)
-                    request.timeoutInterval = 4
-                    let (bytes, response) = try await session.data(for: request)
-                    guard !Task.isCancelled else { return }
-                    if (response as? HTTPURLResponse)?.statusCode == 200,
-                       let body = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-                       let messages = body["messages"] as? [String], let stage = messages.last, stage != last {
-                        last = stage; progress(stage)
-                    }
-                } catch { if Task.isCancelled { return } }
-            }
-        }
-        defer { poller.cancel() }
-        var request = URLRequest(url: URL(string: "\(origin)/api/device/resolve")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 130
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var payload = ["login": credentials.username, "progress_id": progressID, "client": "watch"]
-        if let lookupToken, !lookupToken.isEmpty { payload["lookup_token"] = lookupToken }
-        else { payload["password"] = credentials.password }
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        var request = URLRequest(url: URL(string: "\(origin)/api/device/map")!)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
         let (bytes, response) = try await session.data(for: request)
-        poller.cancel()
-        guard let http = response as? HTTPURLResponse,
-              let body = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { throw WatchAPIError.invalidResponse }
-        guard http.statusCode == 200, body["success"] as? Bool == true else {
-            if let stage = body["stage"] as? String { progress(stage) }
-            throw WatchAPIError.http(http.statusCode, body["message"] as? String ?? "Серверийн хүсэлт амжилтгүй.")
-        }
-        guard let id = body["device_uid"] as? String, !id.isEmpty,
-              let platform = body["platform"] as? String, ["ios", "android"].contains(platform) else { throw WatchAPIError.invalidResponse }
-        progress(body["source"] as? String == "server" ? "Серверт хадгалсан ID олдлоо." : "ID олдож, серверт хадгалагдлаа.")
-        return (id, platform, body["lookup_token"] as? String ?? "")
+        let remote = ((try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any])?["devices"] as? [String: String]
+        let account = credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let id = remote?[account] ?? fallbackDeviceUIDs[account]
+        guard let id, !id.isEmpty else { throw WatchAPIError.server("Энэ хэрэглэгчийн төхөөрөмжийн UID бүртгэлгүй байна.") }
+        progress("Төхөөрөмжийн UID бэлэн боллоо.")
+        return (id, "ios", "")
     }
 
     private func authenticate() async throws -> String {
         guard let credentials else { throw WatchAPIError.missingToken }
-        var body: [String: Any] = ["login": credentials.username, "password": credentials.password]
-        if let uid {
-            body["device_uid"] = uid
-            body["device_name"] = "mobile-\(platform)-\(uid)"
-            body["platform"] = platform
-            body["device_type"] = platform
-        }
+        let body: [String: Any] = [
+            "email": credentials.username,
+            "password": credentials.password,
+            "device_name": "mobile-ios-\(uid ?? "")",
+        ]
         let data = try await raw(path: "/auth/login", token: nil, body: body)
         guard let token = extractToken(data) else { throw WatchAPIError.missingToken }
         let selected = try await raw(path: "/auth/select-tenant", token: token, body: ["tenant_id": tenantID])
@@ -536,7 +514,7 @@ final class UnicoreWatchAPI {
         }
         var payload = location.payload
         payload["device_id"] = uid
-        payload["device_name"] = platform
+        payload["device_name"] = "mobile-ios-\(uid)"
         payload["rule_id"] = 5
         progress("Ирцийн хүсэлт илгээж байна…")
         _ = try await post(path: type.path, token: token, body: payload)
@@ -578,7 +556,8 @@ final class UnicoreWatchAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
         request.setValue(platform, forHTTPHeaderField: "X-App-Platform")
-        request.setValue("1.2.21+245", forHTTPHeaderField: "X-App-Version")
+        request.setValue("1.2.33+263", forHTTPHeaderField: "X-App-Version")
+        request.setValue("UniCore/1.2.33 (iOS 27.0.1; iPhone)", forHTTPHeaderField: "User-Agent")
         if let uid { request.setValue(uid, forHTTPHeaderField: "X-Device-Id") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if method != "GET" { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
